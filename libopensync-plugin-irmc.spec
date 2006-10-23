@@ -9,7 +9,7 @@ Source0:	http://www.opensync.org/attachment/wiki/download/%{name}-%{version}.tar
 # Source0-md5:	52f86db50d653f5af0adefeb76cf9a31
 URL:		http://www.opensync.org/
 BuildRequires:	bluez-libs-devel
-BuildRequires:	libopensync-devel
+BuildRequires:	libopensync-devel >= %{version}
 Obsoletes:	multisync-irmc
 Obsoletes:	multisync-irmc-bluetooth
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
