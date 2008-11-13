@@ -5,7 +5,8 @@ Version:	0.22
 Release:	4
 License:	GPL v2
 Group:		Libraries
-Source0:	http://www.opensync.org/attachment/wiki/download/%{name}-%{version}.tar.bz2?format=raw
+# Source0:	http://www.opensync.org/attachment/wiki/download/%{name}-%{version}.tar.bz2
+Source0:	%{name}-%{version}.tar.bz2
 # Source0-md5:	ecec872b2bccd824b1c5cbb2ec1d5399
 URL:		http://www.opensync.org/
 BuildRequires:	bluez-libs-devel
