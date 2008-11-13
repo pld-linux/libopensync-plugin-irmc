@@ -2,12 +2,11 @@ Summary:	OpenSync IRMC plugin
 Summary(pl.UTF-8):	Wtyczka IRMC do OpenSync
 Name:		libopensync-plugin-irmc
 Version:	0.22
-Release:	3
+Release:	4
 License:	GPL v2
 Group:		Libraries
-#Source0:	http://www.opensync.org/attachment/wiki/download/%{name}-%{version}.tar.bz2
-Source0:	%{name}-%{version}.tar.bz2
-# Source0-md5:	fadd70fcd722f50a8e2a66e235e5208e
+Source0:	http://www.opensync.org/attachment/wiki/download/%{name}-%{version}.tar.bz2?format=raw
+# Source0-md5:	ecec872b2bccd824b1c5cbb2ec1d5399
 URL:		http://www.opensync.org/
 BuildRequires:	bluez-libs-devel
 BuildRequires:	glib2-devel >= 2.0
