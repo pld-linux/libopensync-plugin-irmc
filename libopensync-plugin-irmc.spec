@@ -5,18 +5,20 @@ Version:	0.22
 Release:	7
 License:	GPL v2
 Group:		Libraries
-# Source0:	http://www.opensync.org/attachment/wiki/download/%{name}-%{version}.tar.bz2
+# originally http://www.opensync.org/attachment/wiki/download/%{name}-%{version}.tar.bz2
 Source0:	%{name}-%{version}.tar.bz2
 # Source0-md5:	ecec872b2bccd824b1c5cbb2ec1d5399
-URL:		http://www.opensync.org/
+# dead domain
+#URL:		http://www.opensync.org/
 BuildRequires:	bluez-libs-devel
 BuildRequires:	glib2-devel >= 2.0
 BuildRequires:	libopensync02-devel >= %{version}
 BuildRequires:	libxml2-devel >= 2.0
 BuildRequires:	openobex-devel >= 1.0.0
 BuildRequires:	pkgconfig
-Obsoletes:	multisync-irmc
-Obsoletes:	multisync-irmc-bluetooth
+Requires:	libopensync02 >= %{version}
+Obsoletes:	multisync-irmc < 0.90
+Obsoletes:	multisync-irmc-bluetooth < 0.90
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %description
