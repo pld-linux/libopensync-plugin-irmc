@@ -1,0 +1,673 @@
+--- libopensync-plugin-irmc-0.36/cmake/modules/FindOpenSync.cmake.orig	2008-01-26 18:03:01.000000000 +0100
++++ libopensync-plugin-irmc-0.36/cmake/modules/FindOpenSync.cmake	2025-09-07 19:22:30.491500587 +0200
+@@ -13,7 +13,7 @@
+ #  For details see the accompanying COPYING-CMAKE-SCRIPTS file.
+ #
+ 
+-# Take care about opensync-1.0.pc settings
++# Take care about libopensync.pc settings
+ INCLUDE( FindPkgConfig )
+ 
+ IF ( OpenSync_FIND_REQUIRED )
+@@ -23,15 +23,15 @@ ELSE( OpenSync_FIND_REQUIRED )
+ ENDIF ( OpenSync_FIND_REQUIRED )
+ 
+ IF ( OPENSYNC_MIN_VERSION )
+-	PKG_SEARCH_MODULE( OPENSYNC ${_pkgconfig_REQUIRED} opensync-1.0>=${OPENSYNC_MIN_VERSION} )
++	PKG_SEARCH_MODULE( OPENSYNC ${_pkgconfig_REQUIRED} libopensync>=${OPENSYNC_MIN_VERSION} )
+ ELSE ( OPENSYNC_MIN_VERSION )
+-	PKG_SEARCH_MODULE( OPENSYNC ${_pkgconfig_REQUIRED} opensync-1.0 )
++	PKG_SEARCH_MODULE( OPENSYNC ${_pkgconfig_REQUIRED} libopensync )
+ ENDIF ( OPENSYNC_MIN_VERSION )
+ 
+ FIND_PROGRAM( PKGCONFIG_EXECUTABLE NAMES pkg-config )
+ 
+ IF ( PKGCONFIG_EXECUTABLE )
+-	EXEC_PROGRAM( ${PKGCONFIG_EXECUTABLE} ARGS opensync-1.0 --variable=datadir OUTPUT_VARIABLE _opensync_data_DIR )
++	EXEC_PROGRAM( ${PKGCONFIG_EXECUTABLE} ARGS libopensync --variable=datadir OUTPUT_VARIABLE _opensync_data_DIR )
+ 	STRING( REGEX REPLACE "[\r\n]" " " _opensync_data_DIR "${_opensync_data_DIR}"  )
+ ENDIF ( PKGCONFIG_EXECUTABLE )
+ 
+@@ -47,7 +47,7 @@ ENDIF ( OPENSYNC_CMAKE_MODULES )
+ # Look for OpenSync include dir and libraries without pkg-config 
+ IF( NOT OPENSYNC_FOUND AND NOT PKG_CONFIG_FOUND )
+ 	# Fallback if pkg-config doesn't exist
+-	FIND_PATH( OPENSYNC_INCLUDE_DIRS opensync/opensync.h PATH_SUFFIXES opensync-1.0
++	FIND_PATH( OPENSYNC_INCLUDE_DIRS opensync/opensync.h PATH_SUFFIXES libopensync1
+ 			PATHS
+ 			/opt/local/include/
+ 			/sw/include/
+--- libopensync-plugin-irmc-0.36/CMakeLists.txt.orig	2008-01-26 18:03:01.000000000 +0100
++++ libopensync-plugin-irmc-0.36/CMakeLists.txt	2025-09-10 21:45:11.670913789 +0200
+@@ -10,7 +10,6 @@ SET( OPENSYNC_MIN_VERSION "0.36" )
+ 
+ FIND_PACKAGE( OpenSync REQUIRED )
+ FIND_PACKAGE( GLIB2 REQUIRED )
+-FIND_PACKAGE( LibXml2 REQUIRED )
+ FIND_PACKAGE( OpenObex REQUIRED )
+ FIND_PACKAGE( BlueZ )
+ 
+--- libopensync-plugin-irmc-0.36/src/CMakeLists.txt.orig	2008-01-26 18:03:01.000000000 +0100
++++ libopensync-plugin-irmc-0.36/src/CMakeLists.txt	2025-09-10 21:45:31.920804086 +0200
+@@ -1,7 +1,7 @@
+-LINK_DIRECTORIES( ${OPENOBEX_LIBRARY_DIRS} ${BLUEZ_LIBRARY_DIRS} ${OPENSYNC_LIBRARY_DIRS} ${GLIB2_LIBRARY_DIRS} ${LIBXML2_LIBRARY_DIRS} ) 
++LINK_DIRECTORIES( ${OPENOBEX_LIBRARY_DIRS} ${BLUEZ_LIBRARY_DIRS} ${OPENSYNC_LIBRARY_DIRS} ${GLIB2_LIBRARY_DIRS} ) 
+ INCLUDE_DIRECTORIES( ${CMAKE_CURRENT_SOURCE_DIR}/bfb ${CMAKE_CURRENT_SOURCE_DIR} 
+ 		${OPENSYNC_INCLUDE_DIRS} ${OPENOBEX_INCLUDE_DIRS} ${BLUEZ_INCLUDE_DIRS} 
+-		${GLIB2_INCLUDE_DIRS} ${LIBXML2_INCLUDE_DIRS} )
++		${GLIB2_INCLUDE_DIRS} )
+ 
+ # irmc-sync source	
+ SET( irmc_sync_LIB_SRCS
+@@ -16,7 +16,7 @@ irmc_obex.c
+ 
+ OPENSYNC_PLUGIN_ADD( irmc-sync ${irmc_sync_LIB_SRCS} ) 
+ 
+-TARGET_LINK_LIBRARIES( irmc-sync ${OPENSYNC_LIBRARIES} ${OPENOBEX_LIBRARIES} ${BLUEZ_LIBRARIES} ${GLIB2_LIBRARIES} ${LIBXML2_LIBRARIES} )
++TARGET_LINK_LIBRARIES( irmc-sync ${OPENSYNC_LIBRARIES} ${OPENOBEX_LIBRARIES} ${BLUEZ_LIBRARIES} ${GLIB2_LIBRARIES} )
+ 
+ # Install plugin
+ OPENSYNC_PLUGIN_INSTALL( irmc-sync )
+--- libopensync-plugin-irmc-0.36/src/irmc_sync.h.orig	2025-09-08 18:56:14.658635305 +0200
++++ libopensync-plugin-irmc-0.36/src/irmc_sync.h	2025-09-09 21:56:35.938609091 +0200
+@@ -58,7 +58,7 @@ typedef struct  {
+ } irmc_config;
+ 
+ typedef struct irmc_environment {
+-  char *anchor_path;             // The path of the irmc anchor
++  OSyncSinkStateDB *state_db;
+   irmc_config config;            // The configuration
+   GList *databases;		 // List of irmc_datase
+   osync_bool isConnected;
+@@ -67,6 +67,7 @@ typedef struct irmc_environment {
+ typedef struct irmc_database {
+   OSyncObjFormat *objformat;     // The configured objformat for this database
+   OSyncObjTypeSink *sink;
++  irmc_environment *env;
+   unsigned int changecounter;   
+   char *dbid;
+   char *obex_db;
+--- libopensync-plugin-irmc-0.36/src/irmc_sync.c.orig	2025-09-08 21:10:47.878232254 +0200
++++ libopensync-plugin-irmc-0.36/src/irmc_sync.c	2025-09-10 21:41:37.938738342 +0200
+@@ -24,7 +24,6 @@
+ #include <opensync/opensync.h>
+ #include <opensync/opensync-format.h>
+ #include <opensync/opensync-plugin.h>
+-#include <opensync/opensync-context.h>
+ #include <opensync/opensync-data.h>
+ #include <opensync/opensync-helper.h>
+ #include <opensync/opensync-group.h>
+@@ -32,9 +31,6 @@
+ 
+ #include <assert.h>
+ 
+-#include <libxml/xmlmemory.h>
+-#include <libxml/parser.h>
+-
+ #include "irmc_sync.h"
+ 
+ #define SYNC_OBJECT_TYPE_CALENDAR 0
+@@ -147,84 +143,51 @@ void irmc_disconnect(irmc_config *config
+ /**
+  * Parses the configuration of this plugin from a string in xml format.
+  */
+-osync_bool parse_settings(irmc_config *config, const char *data, unsigned int size, OSyncError **error)
++osync_bool parse_settings(irmc_config *config, OSyncPluginConfig *data, OSyncError **error)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p, %p, %p)", __func__, config, data, error);
+   osync_trace(TRACE_SENSITIVE, "Content of data:\n%s", data);
+ 
+-  xmlDoc *doc = NULL;
+-  xmlNode *cur = NULL;
+-
+   // set defaults
+   config->donttellsync = FALSE;
+   config->serial_number = NULL;
+ 
+-
+-  doc = xmlParseMemory(data, size);
+-
+-  if (!doc) {
+-    osync_error_set(error, OSYNC_ERROR_GENERIC, "Unable to parse settings");
+-    goto error;
+-  }
+-
+-  cur = (xmlNode *) xmlDocGetRootElement(doc);
+-
+-  if (!cur) {
+-    osync_error_set(error, OSYNC_ERROR_GENERIC, "Unable to get root element of the settings");
+-    goto error_free_doc;
+-  }
+-
+-  if (xmlStrcmp(cur->name, (const xmlChar*) "config")) {
+-    osync_error_set(error, OSYNC_ERROR_GENERIC, "Config valid is not valid");
+-    goto error_free_doc;
+-  }
+-
+-  cur = cur->xmlChildrenNode;
+-
+-  while (cur != NULL) {
+-    char *str = (char *) xmlNodeGetContent(cur);
+-    if (str) {
+-      if (!xmlStrcmp(cur->name, (const xmlChar *)"connectmedium")) {
+-        if (!strcmp(str, "bluetooth"))
+-          config->connectmedium = MEDIUM_BLUETOOTH;
+-        else if (!strcmp(str, "ir"))
+-          config->connectmedium = MEDIUM_IR;
+-        else if (!strcmp(str, "cable"))
+-          config->connectmedium = MEDIUM_CABLE;
++  OSyncList *optslist = osync_plugin_config_get_advancedoptions(data);
++  for (; optslist; optslist = optslist->next) {
++    OSyncPluginAdvancedOption *option = optslist->data;
++    const char *name = osync_plugin_advancedoption_get_name(option);
++    const char *value = osync_plugin_advancedoption_get_value(option);
++    if (!strcmp(name, "connectmedium")) {
++      if (!strcmp(value, "bluetooth"))
++        config->connectmedium = MEDIUM_BLUETOOTH;
++      else if (!strcmp(value, "ir"))
++        config->connectmedium = MEDIUM_IR;
++      else if (!strcmp(value, "cable"))
++        config->connectmedium = MEDIUM_CABLE;
+ #ifdef HAVE_BLUETOOTH
+-      } else if (!xmlStrcmp(cur->name, (const xmlChar *)"btunit")) {
+-        baswap(&(config->bdaddr), strtoba(str));
+-      } else if (!xmlStrcmp(cur->name, (const xmlChar *)"btchannel")) {
+-        config->btchannel = atoi(str);
++    } else if (!strcmp(name, "btunit")) {
++      baswap(&(config->bdaddr), strtoba(value));
++    } else if (!strcmp(name, "btchannel")) {
++      config->btchannel = atoi(value);
+ #endif
+-      } else if (!xmlStrcmp(cur->name, (const xmlChar *)"irname")) {
+-        strncpy(config->irunit.name, str, 31);
+-      } else if (!xmlStrcmp(cur->name, (const xmlChar *)"irserial")) {
+-        strncpy(config->irunit.serial, str, 127);
+-      } else if (!xmlStrcmp(cur->name, (const xmlChar *)"cabledev")) {
+-        strncpy(config->cabledev, str, 19);
+-      } else if (!xmlStrcmp(cur->name, (const xmlChar *)"cabletype")) {
+-        config->cabletype = atoi(str);
+-      } else if (!xmlStrcmp(cur->name, (const xmlChar *)"donttellsync")) {
+-        if (!strcmp(str, "true"))
+-          config->donttellsync = TRUE;
+-        else
+-          config->donttellsync = FALSE;
+-      }
+-      xmlFree(str);
++    } else if (!strcmp(name, "irname")) {
++      strncpy(config->irunit.name, value, 31);
++    } else if (!strcmp(name, "irserial")) {
++      strncpy(config->irunit.serial, value, 127);
++    } else if (!strcmp(name, "cabledev")) {
++      strncpy(config->cabledev, value, 19);
++    } else if (!strcmp(name, "cabletype")) {
++      config->cabletype = atoi(value);
++    } else if (!strcmp(name, "donttellsync")) {
++      if (!strcmp(value, "true"))
++        config->donttellsync = TRUE;
++      else
++        config->donttellsync = FALSE;
+     }
+-    cur = cur->next;
+   }
+ 
+-  xmlFreeDoc(doc);
+   osync_trace(TRACE_EXIT, "%s", __func__);
+   return TRUE;
+-
+-error_free_doc:
+-    xmlFreeDoc(doc);
+-error:
+-  osync_trace(TRACE_EXIT_ERROR, "%s: %s", __func__, osync_error_print(error));
+-  return FALSE;
+ }
+ 
+ /**
+@@ -235,8 +198,9 @@ void load_sync_anchors( irmc_environment
+   osync_trace(TRACE_ENTRY, "%s(%p)", __func__, env);
+ 
+   irmc_config *config = &(env->config);
++  OSyncError *error = NULL;
+ 
+-  char *anchor = osync_anchor_retrieve(env->anchor_path, "general");
++  char *anchor = osync_sink_state_get(env->state_db, "general", &error);
+   if (!anchor) {
+     config->serial_number = NULL;
+   } else {
+@@ -258,21 +222,21 @@ void save_sync_anchors( const irmc_envir
+   osync_trace(TRACE_ENTRY, "%s(%p)", __func__, env);
+ 
+   const irmc_config *config = &(env->config);
+-   
+-  osync_anchor_update( env->anchor_path, "general", config->serial_number );
++  OSyncError *error = NULL;
++
++  osync_sink_state_set(env->state_db, "general", config->serial_number, &error);
+   osync_trace(TRACE_EXIT, "%s", __func__);
+ }
+ 
+ /**
+  * Creates the calendar specific changeinfo for slow- and fastsync
+  */
+-void create_calendar_changeinfo(int sync_type, OSyncObjTypeSink *sink, OSyncContext *ctx, char *data, char *luid, int type)
++void create_calendar_changeinfo(int sync_type, irmc_database *database, OSyncContext *ctx, char *data, char *luid, int type)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%i, %p, %p, %s, %i)", __func__, sync_type, ctx, data, luid, type);
+   osync_trace(TRACE_SENSITIVE, "Content of data:\n%s", data);
+ 
+   OSyncError *error = NULL;
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
+   
+   if (sync_type == SLOW_SYNC) {
+     char *event_start = data, *todo_start;
+@@ -373,13 +337,11 @@ void create_calendar_changeinfo(int sync
+ /**
+  * Creates the addressbook specific changeinfo for slow- and fastsync
+  */
+-void create_addressbook_changeinfo(int sync_type, OSyncObjTypeSink *sink, OSyncContext *ctx, char *data, char *luid, int type)
++void create_addressbook_changeinfo(int sync_type, irmc_database *database, OSyncContext *ctx, char *data, char *luid, int type)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%i, %p, %p, %s, %i)", __func__, sync_type, ctx, data, luid, type);			
+   osync_trace(TRACE_SENSITIVE, "Content of data:\n%s", data);
+ 
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
+-
+   OSyncError *error = NULL;
+   int vcard_size = 0;
+ 
+@@ -453,13 +415,11 @@ void create_addressbook_changeinfo(int s
+ /**
+  * Creates the notebook specific changeinfo for slow- and fastsync
+  */
+-void create_notebook_changeinfo(int sync_type, OSyncObjTypeSink *sink, OSyncContext *ctx, char *data, char *luid, int type)
++void create_notebook_changeinfo(int sync_type, irmc_database *database, OSyncContext *ctx, char *data, char *luid, int type)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%i, %p, %p, %s, %i)", __func__, sync_type, ctx, data, luid, type);			
+   osync_trace(TRACE_SENSITIVE, "Content of data:\n%s", data);
+ 
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
+-  
+   OSyncError *error = NULL;
+ 
+   if (sync_type == SLOW_SYNC) {
+@@ -543,12 +503,10 @@ void create_notebook_changeinfo(int sync
+  *   - create_addressbook_changeinfo()
+  *   - create_notebook_changeinfo()
+  */
+-gboolean get_generic_changeinfo(irmc_environment *env, OSyncPluginInfo *oinfo, OSyncContext *ctx, data_type_information *info, OSyncError **error)
++gboolean get_generic_changeinfo(irmc_environment *env, irmc_database *database, OSyncContext *ctx, data_type_information *info, osync_bool slow_sync, OSyncError **error)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p, %p, %p, %p, %p)", __func__, env, info, ctx, info, error);
+ 
+-  OSyncObjTypeSink *sink = osync_plugin_info_get_sink(oinfo);
+-
+   char *buffer;
+   char *buffer_pos;
+   int buffer_length;
+@@ -567,7 +525,7 @@ gboolean get_generic_changeinfo(irmc_env
+   memset(buffer, 0, DATABUFSIZE);
+ 
+   // check whether we have to do a slowsync
+-  if (osync_objtype_sink_get_slowsync(sink) == TRUE) {
++  if (slow_sync) {
+     osync_trace(TRACE_INTERNAL, "slowsync %s\n", info->name );
+     buffer_length = DATABUFSIZE;
+     if (config->donttellsync) {
+@@ -634,11 +592,11 @@ gboolean get_generic_changeinfo(irmc_env
+ 
+     // handle object specific part
+     if ( strcmp( info->identifier, "event" ) == 0 )
+-      create_calendar_changeinfo( SLOW_SYNC, sink, ctx, buffer, 0, 0 );
++      create_calendar_changeinfo( SLOW_SYNC, database, ctx, buffer, 0, 0 );
+     else if ( strcmp( info->identifier, "contact" ) == 0 )
+-      create_addressbook_changeinfo( SLOW_SYNC, sink, ctx, buffer, 0, 0 );
++      create_addressbook_changeinfo( SLOW_SYNC, database, ctx, buffer, 0, 0 );
+     else if ( strcmp( info->identifier, "note" ) == 0 )
+-     create_notebook_changeinfo( SLOW_SYNC, sink, ctx, buffer, 0, 0 );
++     create_notebook_changeinfo( SLOW_SYNC, database, ctx, buffer, 0, 0 );
+ 
+   } else {
+     osync_trace(TRACE_INTERNAL, "fastsync %s\n", info->name );
+@@ -721,11 +679,11 @@ gboolean get_generic_changeinfo(irmc_env
+ 
+         // handle object specific part
+         if ( strcmp( info->identifier, "event" ) == 0 )
+-          create_calendar_changeinfo(FAST_SYNC, sink, ctx, data, luid, type);
++          create_calendar_changeinfo(FAST_SYNC, database, ctx, data, luid, type);
+         else if ( strcmp( info->identifier, "contact" ) == 0 )
+-          create_addressbook_changeinfo(FAST_SYNC, sink, ctx, data, luid, type);
++          create_addressbook_changeinfo(FAST_SYNC, database, ctx, data, luid, type);
+         else if ( strcmp( info->identifier, "note" ) == 0 )
+-          create_notebook_changeinfo(FAST_SYNC, sink, ctx, data, luid, type);
++          create_notebook_changeinfo(FAST_SYNC, database, ctx, data, luid, type);
+       }
+ 
+       buffer_pos = strstr(buffer_pos, "\r\n");
+@@ -852,18 +810,18 @@ gboolean detect_slowsync(int changecount
+ }
+ 
+ /* Establish connection to the device */
+-static void irmcConnect(void *data, OSyncPluginInfo *info, OSyncContext *ctx)
++static void irmcConnect(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, void *data)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p)", __func__, ctx);			
+ 
+-  irmc_environment *env = (irmc_environment *)data;
++  irmc_database *database = (irmc_database *)data;
++  irmc_environment *env = database->env;
+   irmc_config *config = &(env->config);
+-  OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
++  OSyncError *error = NULL;
+ 
+   const char *objtype = osync_objtype_sink_get_name(sink);
+ 
+-  char *anchor = osync_anchor_retrieve(env->anchor_path, objtype);
++  char *anchor = osync_sink_state_get(env->state_db, objtype, &error);
+   if (!anchor) {
+     database->changecounter = 0;
+     database->dbid = NULL;
+@@ -876,7 +834,6 @@ static void irmcConnect(void *data, OSyn
+   }
+   g_free( anchor );
+ 
+-  OSyncError *error = NULL;
+   if (! env->isConnected) {
+ 
+ 	  config->obexhandle = irmc_obex_client(config);
+@@ -905,7 +862,7 @@ static void irmcConnect(void *data, OSyn
+ 
+   if (slowsync == TRUE) {
+ 	  osync_trace(TRACE_INTERNAL, "Have to do a slowsync for objtype %s", objtype);
+-	  osync_objtype_sink_set_slowsync(sink, TRUE);
++	  osync_context_report_slowsync(ctx);
+   } else {
+     osync_trace(TRACE_INTERNAL, "No slowsync required");
+   }   
+@@ -916,11 +873,12 @@ static void irmcConnect(void *data, OSyn
+ /**
+  * This method is called to disconnect from the device.
+  */
+-static void irmcDisconnect(void *data, OSyncPluginInfo *info, OSyncContext *ctx)
++static void irmcDisconnect(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, void *data)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p, %p, %p)", __func__, data, info, ctx);
+ 
+-  irmc_environment *env = (irmc_environment *)data;
++  irmc_database *database = (irmc_database *)data;
++  irmc_environment *env = database->env;
+ 
+   // TODO: handle disconnect of several sink engines..
+   // disconnect from the device
+@@ -936,20 +894,19 @@ static void irmcDisconnect(void *data, O
+ /**
+  * This method is called when the sync was successfull.
+  */
+-static void irmcSyncDone(void *data, OSyncPluginInfo *info, OSyncContext *ctx)
++static void irmcSyncDone(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, void *data)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p, %p, %p)", __func__, data, info, ctx);			
+ 
+-  OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-
+-  irmc_environment *env = (irmc_environment *)data;
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
++  irmc_database *database = (irmc_database *)data;
++  irmc_environment *env = database->env;
+ 
+   const char *objtype = osync_objtype_sink_get_name(sink);
++  OSyncError *error = NULL;
+ 
+   if (database->changecounter >= 0 && strcmp(database->dbid, "FFFFFF")) {
+     char *anchor = g_strdup_printf("%d:%s", database->changecounter, database->dbid);
+-    osync_anchor_update( env->anchor_path, objtype, anchor );
++    osync_sink_state_set( env->state_db, objtype, anchor, &error);
+     g_free(anchor);
+   } else {
+     osync_trace(TRACE_INTERNAL, "ERROR: Invalid values for event anchor detected.");
+@@ -964,14 +921,13 @@ static void irmcSyncDone(void *data, OSy
+  *
+  * This method calls get_generic_changeinfo() for objtype event
+  */
+-static void irmcCalendarGetChangeinfo(void *data, OSyncPluginInfo *info, OSyncContext *ctx)
++static void irmcCalendarGetChangeinfo(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, osync_bool slow_sync, void *data)
+ {
+   osync_trace(TRACE_ENTRY, "%p, %p, %p)", __func__, data, info, ctx);
+   OSyncError *error = 0;
+ 
+-  OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-  irmc_environment *env = (irmc_environment *)data;
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
++  irmc_database *database = (irmc_database *)data;
++  irmc_environment *env = database->env;
+ 
+   data_type_information datainfo;
+ 
+@@ -983,7 +939,7 @@ static void irmcCalendarGetChangeinfo(vo
+   datainfo.change_counter = &(database->changecounter);
+ 
+ 
+-  if (!get_generic_changeinfo(env, info, ctx, &datainfo, &error))
++  if (!get_generic_changeinfo(env, database, ctx, &datainfo, slow_sync, &error))
+     goto error;
+ 
+   osync_context_report_success(ctx);
+@@ -1000,14 +956,13 @@ error:
+  *
+  * This method calls get_generic_changeinfo() for objtype contact 
+  */
+-static void irmcContactGetChangeinfo(void *data, OSyncPluginInfo *info, OSyncContext *ctx)
++static void irmcContactGetChangeinfo(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, osync_bool slow_sync, void *data)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p,%p,%p)", __func__, data, info, ctx);
+   OSyncError *error = 0;
+ 
+-  OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-  irmc_environment *env = (irmc_environment *)data;
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
++  irmc_database *database = (irmc_database *)data;
++  irmc_environment *env = database->env;
+ 
+   data_type_information datainfo;
+ 
+@@ -1018,7 +973,7 @@ static void irmcContactGetChangeinfo(voi
+   strcpy(datainfo.path_extension, "vcf");
+   datainfo.change_counter = &(database->changecounter);
+ 
+-  if (!get_generic_changeinfo(env, info, ctx, &datainfo, &error))
++  if (!get_generic_changeinfo(env, database, ctx, &datainfo, slow_sync, &error))
+     goto error;
+ 
+   osync_context_report_success(ctx);
+@@ -1035,14 +990,13 @@ error:
+  *
+  * This method calls get_generic_changeinfo() for objtype note 
+  */
+-static void irmcNoteGetChangeinfo(void *data, OSyncPluginInfo *info, OSyncContext *ctx)
++static void irmcNoteGetChangeinfo(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, osync_bool slow_sync, void *data)
+ {
+   osync_trace(TRACE_ENTRY, "%p, %p, %p)", __func__, data, info, ctx);
+   OSyncError *error = 0;
+ 
+-  OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-  irmc_environment *env = (irmc_environment *)data;
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
++  irmc_database *database = (irmc_database *)data;
++  irmc_environment *env = database->env;
+ 
+   data_type_information datainfo;
+ 
+@@ -1053,7 +1007,7 @@ static void irmcNoteGetChangeinfo(void *
+   strcpy(datainfo.path_extension, "vnt");
+   datainfo.change_counter = &(database->changecounter);
+ 
+-  if (!get_generic_changeinfo(env, info, ctx, &datainfo, &error))
++  if (!get_generic_changeinfo(env, database, ctx, &datainfo, slow_sync, &error))
+     goto error;
+ 
+   osync_context_report_success(ctx);
+@@ -1203,14 +1157,13 @@ osync_bool irmcGenericCommitChange(irmc_
+ /**
+  * Commits the calendar specific changeinfo to the device.
+  */
+-static void irmcCalendarCommitChange(void *data, OSyncPluginInfo *info, OSyncContext *ctx, OSyncChange *change)
++static void irmcCalendarCommitChange(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, OSyncChange *change, void *data)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p, %p)", __func__, data, info, ctx, change);
+   data_type_information datainfo;
+ 
+-  OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-  irmc_environment *env = (irmc_environment *)data;
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
++  irmc_database *database = (irmc_database *)data;
++  irmc_environment *env = database->env;
+ 
+   memset(&datainfo, 0, sizeof(datainfo));
+   strcpy(datainfo.name, "calendar");
+@@ -1226,14 +1179,13 @@ static void irmcCalendarCommitChange(voi
+ /**
+  * Commits the addressbook specific changeinfo to the device.
+  */
+-static void irmcContactCommitChange(void *data, OSyncPluginInfo *info, OSyncContext *ctx, OSyncChange *change)
++static void irmcContactCommitChange(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, OSyncChange *change, void *data)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p, %p)", __func__, ctx, change);			
+   data_type_information datainfo;
+ 
+-  OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-  irmc_environment *env = (irmc_environment *)data;
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
++  irmc_database *database = (irmc_database *)data;
++  irmc_environment *env = database->env;
+ 
+   memset(&datainfo, 0, sizeof(datainfo));
+   strcpy(datainfo.name, "addressbook");
+@@ -1249,14 +1201,13 @@ static void irmcContactCommitChange(void
+ /**
+  * Commits the notebook specific changeinfo to the device.
+  */
+-static void irmcNoteCommitChange(void *data, OSyncPluginInfo *info, OSyncContext *ctx, OSyncChange *change)
++static void irmcNoteCommitChange(OSyncObjTypeSink *sink, OSyncPluginInfo *info, OSyncContext *ctx, OSyncChange *change, void *data)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p, %p, %p, %p)", __func__, data, info, ctx, change);			
+   data_type_information datainfo;
+ 
+-  OSyncObjTypeSink *sink = osync_plugin_info_get_sink(info);
+-  irmc_environment *env = (irmc_environment *)data;
+-  irmc_database *database = osync_objtype_sink_get_userdata(sink);
++  irmc_database *database = (irmc_database *)data;
++  irmc_environment *env = database->env;
+ 
+   memset(&datainfo, 0, sizeof(datainfo));
+   strcpy(datainfo.name, "notebook");
+@@ -1278,8 +1229,6 @@ static void irmcFinalize(void *data)
+ 
+   irmc_environment *env = (irmc_environment *)data;
+ 
+-  g_free(env->anchor_path);
+-
+   while (env->databases) {
+     irmc_database *db = env->databases->data;
+     g_free(db);
+@@ -1294,7 +1243,7 @@ static void irmcFinalize(void *data)
+ /**
+  * Discover the capabilities of the IrMC mobile.
+  */
+-static osync_bool irmcDiscover(void *data, OSyncPluginInfo *info, OSyncError **error)
++static osync_bool irmcDiscover(OSyncPluginInfo *info, void *data, OSyncError **error)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p, %p, %p)", __func__, data, info, error);
+ 
+@@ -1319,7 +1268,7 @@ static osync_bool irmcDiscover(void *dat
+   return TRUE;
+ }
+ 
+-static irmc_database *create_database(OSyncPluginInfo *info, const char *objtype, const char *format, char *obex_db, OSyncSinkGetChangesFn getchanges, OSyncSinkCommitFn commit, OSyncError **error)
++static irmc_database *create_database(OSyncPluginInfo *info, irmc_environment *env, const char *objtype, const char *format, char *obex_db, OSyncSinkGetChangesFn getchanges, OSyncSinkCommitFn commit, OSyncError **error)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p, %s, %s, %p)", __func__, info, objtype, format, error);	
+ 
+@@ -1333,15 +1282,13 @@ static irmc_database *create_database(OS
+   if (!database->sink)
+     goto error_free_db;
+ 
+-  OSyncObjTypeSinkFunctions functions;
+-  memset(&functions, 0, sizeof(functions));
+-  functions.connect = irmcConnect;
+-  functions.disconnect = irmcDisconnect;
+-  functions.sync_done = irmcSyncDone;
+-  functions.get_changes = getchanges;
+-  functions.commit = commit;
+-
+-  osync_objtype_sink_set_functions(database->sink, functions, database);
++  database->env = env;
++  osync_objtype_sink_set_userdata(database->sink, database);
++  osync_objtype_sink_set_connect_func(database->sink, irmcConnect);
++  osync_objtype_sink_set_disconnect_func(database->sink, irmcDisconnect);
++  osync_objtype_sink_set_sync_done_func(database->sink, irmcSyncDone);
++  osync_objtype_sink_set_get_changes_func(database->sink, getchanges);
++  osync_objtype_sink_set_commit_func(database->sink, commit);
+ 
+   database->objformat = osync_format_env_find_objformat(formatenv, format);
+   if (!database->objformat) {
+@@ -1349,7 +1296,6 @@ static irmc_database *create_database(OS
+                                            "Is the vformat plugin correctly installed?", format, objtype);
+     goto error_free_db;
+   }
+-  osync_objtype_sink_add_objformat(database->sink, format);
+ 
+   osync_plugin_info_add_objtype(info, database->sink);
+ 
+@@ -1370,7 +1316,7 @@ static irmc_database *create_database(OS
+ static void *irmcInitialize(OSyncPlugin *plugin, OSyncPluginInfo *info, OSyncError **error)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%p, %p, %p)", __func__, plugin, info, error);			
+-  const char *configdata = NULL;
++  OSyncPluginConfig *configdata = NULL;
+ 
+   // create new environment, where all connection information are stored in
+   irmc_environment *env = osync_try_malloc0(sizeof(irmc_environment), error);
+@@ -1387,18 +1333,27 @@ static void *irmcInitialize(OSyncPlugin
+   }
+ 
+   // parse the config data
+-  if (!parse_settings( &(env->config), configdata, strlen(configdata), error)) {
++  if (!parse_settings( &(env->config), configdata, error)) {
+     osync_error_set(error, OSYNC_ERROR_MISCONFIGURATION, "Unable to parse config data: %s", osync_error_print(error));
+     goto error_free_env;
+   }
+ 
+-  // set default irmc anchor path
+-  env->anchor_path = g_strdup_printf("%s/anchor.db", osync_plugin_info_get_configdir(info));
+-
+-  irmc_database *contactdb = create_database(info, "contact", "vcard21", "pb", irmcContactGetChangeinfo, irmcContactCommitChange, error); 
+-  irmc_database *eventdb = create_database(info, "event", "vevent10", "cal", irmcCalendarGetChangeinfo, irmcCalendarCommitChange, error);
+-  irmc_database *tododb = create_database(info, "todo", "vtodo10", "cal", irmcCalendarGetChangeinfo, irmcCalendarCommitChange, error);
+-  irmc_database *notedb = create_database(info, "note", "vnote11", "nt", irmcNoteGetChangeinfo, irmcNoteCommitChange, error);
++  OSyncObjTypeSink *mainsink = osync_objtype_main_sink_new(error);
++  if (!mainsink)
++    goto error_free_env;
++  if (!osync_objtype_sink_open_state_db(mainsink, info, error))
++    goto error_free_env;
++  osync_objtype_sink_enable_state_db(mainsink, TRUE);
++  if (!osync_objtype_sink_open_state_db(mainsink, info, error))
++    goto error_free_env;
++  env->state_db = osync_objtype_sink_get_state_db(mainsink);
++  osync_plugin_info_set_main_sink(info, mainsink);
++  osync_objtype_sink_unref(mainsink);
++  
++  irmc_database *contactdb = create_database(info, env, "contact", "vcard21", "pb", irmcContactGetChangeinfo, irmcContactCommitChange, error); 
++  irmc_database *eventdb = create_database(info, env, "event", "vevent10", "cal", irmcCalendarGetChangeinfo, irmcCalendarCommitChange, error);
++  irmc_database *tododb = create_database(info, env, "todo", "vtodo10", "cal", irmcCalendarGetChangeinfo, irmcCalendarCommitChange, error);
++  irmc_database *notedb = create_database(info, env, "note", "vnote11", "nt", irmcNoteGetChangeinfo, irmcNoteCommitChange, error);
+ 
+   if (!contactdb || !eventdb || !tododb || !notedb)
+     goto error_free_env;
+@@ -1435,7 +1390,7 @@ osync_bool get_sync_info(OSyncPluginEnv
+   osync_plugin_set_finalize(plugin, irmcFinalize);
+   osync_plugin_set_discover(plugin, irmcDiscover);
+ 
+-  osync_plugin_env_register_plugin(env, plugin);
++  osync_plugin_env_register_plugin(env, plugin, error);
+   osync_plugin_unref(plugin);
+ 
+   return TRUE;

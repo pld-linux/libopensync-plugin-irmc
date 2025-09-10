@@ -1,0 +1,105 @@
+--- libopensync-plugin-irmc-0.36/src/irmc_sync.h.orig	2008-01-26 18:03:01.000000000 +0100
++++ libopensync-plugin-irmc-0.36/src/irmc_sync.h	2025-09-08 18:56:14.658635305 +0200
+@@ -34,7 +34,7 @@ typedef enum {
+ typedef struct  {
+   char *serial_number;
+ 
+-  obex_t obexhandle;             // Handle to the obex connection
++  obex_t *obexhandle;             // Handle to the obex connection
+ 
+   // connection options
+   connect_medium connectmedium;  // The connection type
+@@ -75,6 +75,6 @@ typedef struct irmc_database {
+ obex_t* irmc_obex_client(irmc_config *config);
+ char* sync_connect_get_serial(irmc_config *config);
+ gboolean detect_slowsync(int changecounter, char *object, char **dbid, char **serial_number,
+-                         gboolean *slowsync, obex_t obexhandle, OSyncError **error);
++                         gboolean *slowsync, obex_t *obexhandle, OSyncError **error);
+ 
+ #endif
+--- libopensync-plugin-irmc-0.36/src/irmc_sync.c.orig	2008-01-26 18:03:01.000000000 +0100
++++ libopensync-plugin-irmc-0.36/src/irmc_sync.c	2025-09-08 18:54:53.025744215 +0200
+@@ -769,7 +769,7 @@ error:
+  *   - the changelog contains a '*' in the last line
+  */
+ gboolean detect_slowsync(int changecounter, char *object, char **dbid, char **serial_number,
+-                         gboolean *slowsync, obex_t obexhandle, OSyncError **error)
++                         gboolean *slowsync, obex_t *obexhandle, OSyncError **error)
+ {
+   osync_trace(TRACE_ENTRY, "%s(%d, %s, %s, %s, %p, %p)", __func__, changecounter, object, *dbid, *serial_number, obexhandle, error);
+ 
+--- libopensync-plugin-irmc-0.36/src/irmc_obex.c.orig	2008-01-26 18:03:01.000000000 +0100
++++ libopensync-plugin-irmc-0.36/src/irmc_obex.c	2025-09-10 21:43:44.024721942 +0200
+@@ -50,6 +50,28 @@
+ 
+ #include <openobex/obex.h>
+ 
++static int priv_OBEX_CharToUnicode(uint8_t *uc, const uint8_t *c, int size)
++{
++	int len, n;
++
++	if (uc == NULL || c == NULL)
++		return -1;
++
++	len = n = strlen((char *) c);
++	if (n*2+2 > size)
++		return -1;
++
++	uc[n*2+1] = 0;
++	uc[n*2] = 0;
++
++	while (n--) {
++		uc[n*2+1] = c[n];
++		uc[n*2] = 0;
++	}
++
++	return (len * 2) + 2;
++}
++
+ gpointer (*plugin_function)();
+ #define CALL_PLUGIN(mod, name, args) (g_module_symbol(mod,name,(gpointer*)&plugin_function)?(*plugin_function)args:NULL)
+ GModule *bluetoothplugin = NULL;
+@@ -450,7 +472,7 @@ obex_t* irmc_obex_client(irmc_config *co
+ 
+ #ifdef HAVE_IRDA
+   obex_ctrans_t irdatrans = { obex_irda_connect, obex_irda_disconnect,
+-			      obex_cable_listen, obex_cable_write,
++			      obex_cable_listen, NULL, obex_cable_write,
+ 			      obex_cable_handleinput, 0 };
+ #endif
+   obexdata_t *userdata;
+@@ -513,14 +535,14 @@ obex_t* irmc_obex_client(irmc_config *co
+     break;
+   case MEDIUM_IR:
+ #ifdef HAVE_IRDA
+-    if (!(handle = OBEX_Init(OBEX_TRANS_CUST, obex_event, 0)))
++    if (!(handle = OBEX_Init(OBEX_TRANS_CUSTOM, obex_event, 0)))
+       return(0);
+     OBEX_RegisterCTransport(handle, &irdatrans);
+ #endif
+     break;
+   case MEDIUM_CABLE:
+ #ifdef HAVE_COBEX    
+-    if (!(handle = OBEX_Init(OBEX_TRANS_CUST, obex_event, 0)))
++    if (!(handle = OBEX_Init(OBEX_TRANS_CUSTOM, obex_event, 0)))
+       return(0);
+     OBEX_RegisterCTransport(handle, &cabletrans);
+ #endif    
+@@ -687,7 +709,7 @@ gboolean irmc_obex_put(obex_t* handle, c
+     hd.bq4 = body_size; 
+     OBEX_ObjectAddHeader(handle, object, OBEX_HDR_LENGTH, hd, 4, 0); 
+     /* Add unicode name header*/ 
+-    namesize = OBEX_CharToUnicode((uint8_t *) unicodename, (const uint8_t *) name, 1024);
++    namesize = priv_OBEX_CharToUnicode((uint8_t *) unicodename, (const uint8_t *) name, 1024);
+     hd.bs = (const uint8_t *) unicodename; 
+     OBEX_ObjectAddHeader(handle, object, OBEX_HDR_NAME, hd, 
+ 			 namesize, 0); 
+@@ -752,7 +774,7 @@ gboolean irmc_obex_get(obex_t *handle, c
+   userdata = (obexdata_t*) OBEX_GetUserData(handle);  
+   if((object = OBEX_ObjectNew(handle, OBEX_CMD_GET))) {
+     /* Add unicode name header*/ 
+-    namesize = OBEX_CharToUnicode((uint8_t *) unicodename, (const uint8_t *) name, 1024);
++    namesize = priv_OBEX_CharToUnicode((uint8_t *) unicodename, (const uint8_t *) name, 1024);
+     hd.bs = (const uint8_t *) unicodename; 
+     OBEX_ObjectAddHeader(handle, object, OBEX_HDR_NAME, hd, 
+ 			 namesize, 0); 
